@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Keyboard, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 import { useTheme } from '../context/ThemeContext';
 
@@ -15,6 +15,7 @@ export default function TaskInput({ onAddTask }: TaskInputProps) {
         if (text.trim()) {
             onAddTask(text.trim());
             setText('');
+            Keyboard.dismiss();
         }
     };
 

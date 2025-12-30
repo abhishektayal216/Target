@@ -68,5 +68,29 @@ export const storage = {
         } catch (e) {
             console.error('Failed to log activity', e);
         }
+    },
+
+    async completeTasksByTargetId(targetId: string): Promise<number> {
+        try {
+            const tasks = await this.loadTasks();
+            let completedCount = 0;
+
+            const updatedTasks = tasks.map(task => {
+                if (task.linkedTargetId === targetId && !task.completed) {
+                    completedCount++;
+                    return { ...task, completed: true };
+                }
+                return task;
+            });
+
+            if (completedCount > 0) {
+                await this.saveTasks(updatedTasks);
+            }
+
+            return completedCount;
+        } catch (e) {
+            console.error('Failed to complete tasks by target ID', e);
+            return 0;
+        }
     }
 };

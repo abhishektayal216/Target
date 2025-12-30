@@ -1,15 +1,19 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Dimensions, KeyboardAvoidingView, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { addDays, format } from 'date-fns';
+import { useFocusEffect, useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Dimensions, Keyboard, KeyboardAvoidingView, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import DraggableFlatList, { RenderItemParams, ScaleDecorator } from 'react-native-draggable-flatlist';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import BottomSheet, { BottomSheetRef } from '../../components/CustomBottomSheet';
+import { Target } from '../../components/TargetItem';
 import TaskInput from '../../components/TaskInput';
 import TaskItem, { Task } from '../../components/TaskItem';
+import UserPrefsModal from '../../components/UserPrefsModal';
 import { useTheme } from '../../context/ThemeContext';
+import { aiService } from '../../utils/aiService';
 import { storage } from '../../utils/storage';
 
 
@@ -18,10 +22,14 @@ export default function TasksScreen() {
   const { colors } = useTheme();
   const router = useRouter();
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [showPrefsModal, setShowPrefsModal] = useState(false);
 
-  useEffect(() => {
-    loadInitialData();
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      loadInitialData();
+    }, [])
+  );
 
   const loadInitialData = async () => {
     const savedTasks = await storage.loadTasks();
@@ -50,6 +58,7 @@ export default function TasksScreen() {
       ...prev,
     ]);
     addTaskSheetRef.current?.scrollTo(0); // Close on save
+    Keyboard.dismiss();
   };
 
   const toggleTask = (id: string) => {
@@ -81,6 +90,157 @@ export default function TasksScreen() {
   const openAddSheet = () => {
     const { height: SCREEN_HEIGHT } = Dimensions.get('window');
     addTaskSheetRef.current?.scrollTo(-SCREEN_HEIGHT / 2); // Larger sheet for text area
+  };
+
+  // AI: Cleanup unnecessary tasks
+  const handleAICleanup = async () => {
+    // Check API key
+    const apiKey = await aiService.getApiKey();
+    if (!apiKey) {
+      Alert.alert(
+        'API Key Required',
+        'Please add your Gemini API key in the Settings menu.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const unnecessaryIds = await aiService.suggestUnnecessaryTasks(activeTasks);
+
+      if (unnecessaryIds.length === 0) {
+        Alert.alert('AI Analysis', 'No unnecessary tasks found. Good job keeping your list clean!');
+        return;
+      }
+
+      Alert.alert(
+        'AI Cleanup Recommendation',
+        `AI found ${unnecessaryIds.length} tasks that seem unnecessary. Mark them as complete?`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Mark Complete',
+            style: 'destructive',
+            onPress: () => {
+              const updatedTasks = tasks.map(t =>
+                unnecessaryIds.includes(t.id) ? { ...t, completed: true, aiSuggested: true } : t
+              );
+              setTasks(updatedTasks);
+            }
+          }
+        ]
+      );
+    } catch (error: any) {
+      console.error('Cleanup Error:', error);
+      Alert.alert(
+        'AI Error',
+        `Failed to analyze tasks. \n\nDetails: ${error.message || 'Unknown error'}`
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // AI Menu Action
+  const handleAIPress = () => {
+    Alert.alert(
+      'AI Assistant 🤖',
+      'Choose an action:',
+      [
+        { text: 'Plan Tomorrow (Targets)', onPress: handleConvertToTargets },
+        { text: 'Cleanup Tasks', onPress: handleAICleanup },
+        { text: 'Cancel', style: 'cancel' }
+      ]
+    );
+  };
+
+  // AI: Convert tasks to targets
+  const handleConvertToTargets = async () => {
+    // First check if API key is set
+    const apiKey = await aiService.getApiKey();
+    if (!apiKey) {
+      Alert.alert(
+        'API Key Required',
+        'Please add your Gemini API key in the Settings menu (tap the hamburger icon).',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
+    // Check if user prefs are complete
+    const userPrefs = await aiService.getUserPrefs();
+    if (!userPrefs.prefsCompleted) {
+      setShowPrefsModal(true);
+      return;
+    }
+
+    await generateTargets();
+  };
+
+  const generateTargets = async () => {
+    if (activeTasks.length === 0) {
+      Alert.alert('No Tasks', 'Add some tasks first before converting to targets.');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const aiTargets = await aiService.generateTargetsFromTasks(activeTasks);
+
+      if (aiTargets.length === 0) {
+        Alert.alert('No Targets Generated', 'AI could not generate targets from your tasks. Try adding more specific tasks.');
+        return;
+      }
+
+      // Load existing targets
+      const existingTargets = await storage.loadTargets();
+      const tomorrow = format(addDays(new Date(), 1), 'yyyy-MM-dd');
+
+      // Convert AI targets to actual Target objects
+      const newTargets: Target[] = aiTargets.map((at, index) => ({
+        id: `${Date.now()}-${index}`,
+        title: at.title,
+        type: at.type,
+        targetValue: at.targetValue,
+        currentValue: 0,
+        startTime: null,
+        frequency: 'Once' as const,
+        assignedDate: tomorrow,
+        notes: at.notes,
+        reminderTime: at.reminderTime ? `${tomorrow}T${at.reminderTime}:00` : undefined,
+        linkedTaskIds: at.linkedTaskIds,
+        priority: at.priority,
+      }));
+
+      // Link tasks to their generated targets
+      const updatedTasks = tasks.map(task => {
+        const linkedTarget = newTargets.find(t => t.linkedTaskIds?.includes(task.id));
+        if (linkedTarget) {
+          return { ...task, linkedTargetId: linkedTarget.id };
+        }
+        return task;
+      });
+
+      // Save everything
+      await storage.saveTargets([...existingTargets, ...newTargets]);
+      setTasks(updatedTasks);
+
+      Alert.alert(
+        'Targets Created! 🎯',
+        `${newTargets.length} targets have been created for tomorrow (${format(addDays(new Date(), 1), 'MMM d')}).`,
+        [{ text: 'View Targets', onPress: () => router.push('/targets') }, { text: 'OK' }]
+      );
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to generate targets');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handlePrefsComplete = () => {
+    // After prefs are saved, trigger target generation
+    generateTargets();
   };
 
   const renderItem = ({ item, drag, isActive }: RenderItemParams<Task>) => {
@@ -125,6 +285,22 @@ export default function TasksScreen() {
           </TouchableOpacity>
         )}
 
+        {/* AI Convert Button */}
+        <TouchableOpacity
+          style={[styles.aiButton, { backgroundColor: colors.secondary }]}
+          onPress={handleAIPress}
+          disabled={isLoading}
+        >
+          {isLoading ? (
+            <ActivityIndicator size="small" color="#FFF" />
+          ) : (
+            <>
+              <Ionicons name="sparkles" size={18} color="#FFF" />
+              <Text style={styles.aiButtonText}>AI</Text>
+            </>
+          )}
+        </TouchableOpacity>
+
         <TouchableOpacity
           style={[styles.fab, { backgroundColor: colors.primary }]}
           onPress={openAddSheet}
@@ -144,6 +320,13 @@ export default function TasksScreen() {
           </View>
         </KeyboardAvoidingView>
       </BottomSheet>
+
+      {/* User Preferences Modal */}
+      <UserPrefsModal
+        visible={showPrefsModal}
+        onClose={() => setShowPrefsModal(false)}
+        onComplete={handlePrefsComplete}
+      />
     </SafeAreaView>
   );
 }
@@ -158,7 +341,7 @@ const styles = StyleSheet.create({
   },
   footerContainer: {
     position: 'absolute',
-    bottom: 75,
+    bottom: 16,
     left: 0,
     right: 20,
     flexDirection: 'row',
@@ -167,6 +350,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     pointerEvents: 'box-none',
     zIndex: 10,
+    gap: 12,
   },
   completedButton: {
     paddingVertical: 8,
@@ -174,6 +358,25 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     borderWidth: 1,
     marginRight: 'auto',
+  },
+  aiButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 4,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+  },
+  aiButtonText: {
+    color: '#FFF',
+    fontWeight: '700',
+    fontSize: 12,
   },
   fab: {
     width: 64,

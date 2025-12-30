@@ -1,7 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { format } from 'date-fns';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useFocusEffect } from 'expo-router';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     Dimensions,
     FlatList,
@@ -9,14 +10,13 @@ import {
     StyleSheet,
     Text,
     TextInput,
+    TouchableOpacity,
     View
 } from 'react-native';
-import {
-    TouchableOpacity
-} from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import BottomSheet, { BottomSheetRef } from '../../components/CustomBottomSheet';
+import FocusModal from '../../components/FocusModal';
 import TargetItem, { Target } from '../../components/TargetItem';
 import WeekCalendar from '../../components/WeekCalendar';
 import { useTheme } from '../../context/ThemeContext';
@@ -30,9 +30,11 @@ export default function TargetsScreen() {
     const [selectedDate, setSelectedDate] = useState(new Date());
     const [targets, setTargets] = useState<Target[]>([]);
 
-    useEffect(() => {
-        loadInitialData();
-    }, []);
+    useFocusEffect(
+        useCallback(() => {
+            loadInitialData();
+        }, [])
+    );
 
     const loadInitialData = async () => {
         const savedTargets = await storage.loadTargets();
@@ -185,51 +187,49 @@ export default function TargetsScreen() {
             });
         }
 
+        // Check if target is completed
+        if (newVal >= target.targetValue) {
+            await storage.completeTasksByTargetId(id);
+        }
+
         setTargets(prev => prev.map(t => t.id === id ? { ...t, currentValue: newVal } : t));
     };
 
+    const [focusedTarget, setFocusedTarget] = useState<Target | null>(null);
+    const [isFocusModalVisible, setIsFocusModalVisible] = useState(false);
+
     const handleToggleTimer = async (target: Target) => {
-        if (target.startTime) {
-            // Stop logic
-            const now = Date.now();
-            const sessionSecs = (now - target.startTime) / 1000;
-
-            // Log the session
-            if (sessionSecs > 1) { // ignore accidental clicks < 1s
-                await storage.logActivity({
-                    id: Date.now().toString(),
-                    targetId: target.id,
-                    targetTitle: target.title,
-                    timestamp: now,
-                    valueChange: sessionSecs,
-                    dateStr: format(new Date(), 'yyyy-MM-dd')
-                });
-            }
-
-            // Add session to current value and clear startTime
-            setTargets(prev => prev.map(t => {
-                if (t.id === target.id) {
-                    return {
-                        ...t,
-                        currentValue: t.currentValue + sessionSecs,
-                        startTime: null
-                    };
-                }
-                return t;
-            }));
-        } else {
-            // Start logic
-            setTargets(prev => prev.map(t => {
-                // Optional: Stop other timers? For now, let multiples run if user wants.
-                if (t.id === target.id) {
-                    return {
-                        ...t,
-                        startTime: Date.now()
-                    };
-                }
-                return t;
-            }));
+        // Whether starting or resuming, just open the modal.
+        // We set the startTime if it's not set.
+        if (!target.startTime) {
+            const updated = targets.map(t =>
+                t.id === target.id ? { ...t, startTime: Date.now() } : t
+            );
+            setTargets(updated);
+            // storage.saveTargets(updated); // Effect will handle save
         }
+        setFocusedTarget(target);
+        setIsFocusModalVisible(true);
+    };
+
+    const handleStopFocus = async (sessionSeconds: number) => {
+        if (!focusedTarget) return;
+
+        // 1. Calculate new values
+        const newValue = focusedTarget.currentValue + sessionSeconds;
+
+        // 2. Log activity (using our existing update logic which logs if diff > 0)
+        // We can manually call updateTargetValue or replicate logic.
+        // Let's reuse updateTargetValue for consistency.
+        await updateTargetValue(focusedTarget.id, newValue);
+
+        // 3. Clear start time
+        setTargets(prev => prev.map(t =>
+            t.id === focusedTarget.id ? { ...t, startTime: null } : t
+        ));
+
+        setIsFocusModalVisible(false);
+        setFocusedTarget(null);
     };
 
     const deleteTarget = async (id: string) => {
@@ -242,7 +242,11 @@ export default function TargetsScreen() {
 
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
-            <WeekCalendar selectedDate={selectedDate} onDateSelect={setSelectedDate} />
+
+
+            <View style={styles.calendarContainer}>
+                <WeekCalendar selectedDate={selectedDate} onDateSelect={setSelectedDate} />
+            </View>
 
             <View style={styles.content}>
                 {filteredTargets.length === 0 ? (
@@ -433,6 +437,13 @@ export default function TargetsScreen() {
                     </TouchableOpacity>
                 </ScrollView>
             </BottomSheet>
+
+            <FocusModal
+                visible={isFocusModalVisible}
+                target={focusedTarget}
+                onStop={handleStopFocus}
+                onClose={() => setIsFocusModalVisible(false)}
+            />
         </SafeAreaView>
     );
 }
@@ -440,6 +451,21 @@ export default function TargetsScreen() {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
+    },
+    header: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingHorizontal: 20,
+        paddingVertical: 12,
+        borderBottomWidth: 1,
+    },
+    headerTitle: {
+        fontSize: 20,
+        fontWeight: 'bold',
+    },
+    calendarContainer: {
+        paddingVertical: 10,
     },
     content: {
         flex: 1,
@@ -458,7 +484,7 @@ const styles = StyleSheet.create({
     },
     footerContainer: {
         position: 'absolute',
-        bottom: 75,
+        bottom: 16,
         left: 0,
         right: 24,
         flexDirection: 'row',

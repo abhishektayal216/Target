@@ -8,6 +8,9 @@ export interface Task {
     id: string;
     text: string;
     completed: boolean;
+    priority?: number;
+    linkedTargetId?: string;
+    aiSuggested?: boolean;
 }
 
 interface TaskItemProps {

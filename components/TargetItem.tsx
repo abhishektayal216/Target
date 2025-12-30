@@ -17,6 +17,8 @@ export interface Target {
     notes?: string;
     reminderTime?: string; // ISO string
     notificationId?: string;
+    linkedTaskIds?: string[]; // Task IDs that this target was created from
+    priority?: number;
 }
 
 interface TargetItemProps {
