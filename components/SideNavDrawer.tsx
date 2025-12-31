@@ -45,6 +45,7 @@ const SideNavDrawer = forwardRef<SideNavRef, SideNavDrawerProps>(({ onClose }, r
     const [isVisible, setIsVisible] = useState(false);
     const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
     const [showPrefsModal, setShowPrefsModal] = useState(false);
+    const [showModelDropdown, setShowModelDropdown] = useState(false);
 
     const translateX = useSharedValue(-DRAWER_WIDTH);
 
@@ -225,26 +226,46 @@ const SideNavDrawer = forwardRef<SideNavRef, SideNavDrawerProps>(({ onClose }, r
                 </View>
 
                 {/* AI Model Name Section */}
+                {/* AI Model Name Section */}
                 <View style={[styles.section, { paddingTop: 0 }]}>
                     <Text style={[styles.sectionTitle, { color: colors.text }]}>
                         <Ionicons name="hardware-chip-outline" size={16} color={colors.primary} /> AI Model Name
                     </Text>
-                    <TextInput
-                        style={[styles.input, {
-                            backgroundColor: colors.background,
-                            color: colors.text,
-                            borderColor: colors.border
-                        }]}
-                        placeholder="e.g. gemini-2.0-flash-exp"
-                        placeholderTextColor={colors.textSecondary}
-                        value={modelName}
-                        onChangeText={saveModelName}
-                        autoCapitalize="none"
-                        autoCorrect={false}
-                    />
-                    <Text style={[styles.hint, { color: colors.textSecondary }]}>
-                        Default: {DEFAULT_MODEL}
-                    </Text>
+
+                    <TouchableOpacity
+                        style={[styles.dropdownButton, { borderColor: colors.border, backgroundColor: colors.background }]}
+                        onPress={() => setShowModelDropdown(!showModelDropdown)}
+                    >
+                        <Text style={{ color: colors.text }}>{modelName}</Text>
+                        <Ionicons name={showModelDropdown ? "chevron-up" : "chevron-down"} size={16} color={colors.textSecondary} />
+                    </TouchableOpacity>
+
+                    {showModelDropdown && (
+                        <View style={[styles.dropdownList, { borderColor: colors.border, backgroundColor: colors.background }]}>
+                            {['gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-3-flash'].map((m) => (
+                                <TouchableOpacity
+                                    key={m}
+                                    style={[styles.dropdownItem, {
+                                        backgroundColor: modelName === m ? colors.primary + '20' : 'transparent',
+                                        borderBottomColor: colors.border,
+                                        borderBottomWidth: 1
+                                    }]}
+                                    onPress={() => {
+                                        saveModelName(m);
+                                        setShowModelDropdown(false);
+                                    }}
+                                >
+                                    <Text style={{
+                                        color: modelName === m ? colors.primary : colors.text,
+                                        fontWeight: modelName === m ? 'bold' : 'normal'
+                                    }}>
+                                        {m}
+                                    </Text>
+                                    {modelName === m && <Ionicons name="checkmark" size={16} color={colors.primary} />}
+                                </TouchableOpacity>
+                            ))}
+                        </View>
+                    )}
                 </View>
 
                 {/* Work Preferences Section */}
@@ -393,6 +414,26 @@ const styles = StyleSheet.create({
     version: {
         fontSize: 12,
         marginTop: 4,
+    },
+    dropdownButton: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        borderWidth: 1,
+        borderRadius: 8,
+        padding: 12,
+    },
+    dropdownList: {
+        marginTop: 8,
+        borderWidth: 1,
+        borderRadius: 8,
+        overflow: 'hidden',
+    },
+    dropdownItem: {
+        padding: 12,
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
     },
 });
 

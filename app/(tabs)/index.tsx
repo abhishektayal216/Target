@@ -92,112 +92,69 @@ export default function TasksScreen() {
     addTaskSheetRef.current?.scrollTo(-SCREEN_HEIGHT / 2); // Larger sheet for text area
   };
 
-  // AI: Cleanup unnecessary tasks
-  const handleAICleanup = async () => {
-    // Check API key
+  const handlePrefsComplete = () => {
+    handleAutoAIWorkflow();
+  };
+
+  const handleAutoAIWorkflow = async () => {
+    // 1. Validation
     const apiKey = await aiService.getApiKey();
     if (!apiKey) {
-      Alert.alert(
-        'API Key Required',
-        'Please add your Gemini API key in the Settings menu.',
-        [{ text: 'OK' }]
-      );
+      Alert.alert('API Key Required', 'Please add your Gemini API key in Settings.');
       return;
     }
 
-    setIsLoading(true);
-    try {
-      const unnecessaryIds = await aiService.suggestUnnecessaryTasks(activeTasks);
-
-      if (unnecessaryIds.length === 0) {
-        Alert.alert('AI Analysis', 'No unnecessary tasks found. Good job keeping your list clean!');
-        return;
-      }
-
-      Alert.alert(
-        'AI Cleanup Recommendation',
-        `AI found ${unnecessaryIds.length} tasks that seem unnecessary. Mark them as complete?`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Mark Complete',
-            style: 'destructive',
-            onPress: () => {
-              const updatedTasks = tasks.map(t =>
-                unnecessaryIds.includes(t.id) ? { ...t, completed: true, aiSuggested: true } : t
-              );
-              setTasks(updatedTasks);
-            }
-          }
-        ]
-      );
-    } catch (error: any) {
-      console.error('Cleanup Error:', error);
-      Alert.alert(
-        'AI Error',
-        `Failed to analyze tasks. \n\nDetails: ${error.message || 'Unknown error'}`
-      );
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // AI Menu Action
-  const handleAIPress = () => {
-    Alert.alert(
-      'AI Assistant 🤖',
-      'Choose an action:',
-      [
-        { text: 'Plan Tomorrow (Targets)', onPress: handleConvertToTargets },
-        { text: 'Cleanup Tasks', onPress: handleAICleanup },
-        { text: 'Cancel', style: 'cancel' }
-      ]
-    );
-  };
-
-  // AI: Convert tasks to targets
-  const handleConvertToTargets = async () => {
-    // First check if API key is set
-    const apiKey = await aiService.getApiKey();
-    if (!apiKey) {
-      Alert.alert(
-        'API Key Required',
-        'Please add your Gemini API key in the Settings menu (tap the hamburger icon).',
-        [{ text: 'OK' }]
-      );
-      return;
-    }
-
-    // Check if user prefs are complete
     const userPrefs = await aiService.getUserPrefs();
     if (!userPrefs.prefsCompleted) {
       setShowPrefsModal(true);
       return;
     }
 
-    await generateTargets();
-  };
-
-  const generateTargets = async () => {
     if (activeTasks.length === 0) {
-      Alert.alert('No Tasks', 'Add some tasks first before converting to targets.');
+      Alert.alert('No Tasks', 'Add some tasks first!');
       return;
     }
 
     setIsLoading(true);
     try {
-      const aiTargets = await aiService.generateTargetsFromTasks(activeTasks);
+      // 2. Auto Cleanup
+      let currentTasks = [...tasks];
+      let tasksToProcess = [...activeTasks];
+      let cleanedCount = 0;
 
-      if (aiTargets.length === 0) {
-        Alert.alert('No Targets Generated', 'AI could not generate targets from your tasks. Try adding more specific tasks.');
+      try {
+        const unnecessaryIds = await aiService.suggestUnnecessaryTasks(tasksToProcess);
+        if (unnecessaryIds.length > 0) {
+          cleanedCount = unnecessaryIds.length;
+          // Update local state for processing
+          currentTasks = currentTasks.map(t =>
+            unnecessaryIds.includes(t.id) ? { ...t, completed: true, aiSuggested: true } : t
+          );
+          // Filter out the ones we just cleaned
+          tasksToProcess = tasksToProcess.filter(t => !unnecessaryIds.includes(t.id));
+        }
+      } catch (e) {
+        console.warn('Cleanup failed, proceeding to generation', e);
+      }
+
+      // 3. Generate Targets
+      if (tasksToProcess.length === 0) {
+        setTasks(currentTasks); // Save cleanup if any
+        Alert.alert('Finished', `Cleaned ${cleanedCount} tasks. No remaining tasks to create targets.`);
         return;
       }
 
-      // Load existing targets
+      const aiTargets = await aiService.generateTargetsFromTasks(tasksToProcess);
+
+      if (aiTargets.length === 0 && cleanedCount === 0) {
+        Alert.alert('AI Analysis', 'No targets generated and no cleanup needed.');
+        return;
+      }
+
+      // 4. Persistence
       const existingTargets = await storage.loadTargets();
       const tomorrow = format(addDays(new Date(), 1), 'yyyy-MM-dd');
 
-      // Convert AI targets to actual Target objects
       const newTargets: Target[] = aiTargets.map((at, index) => ({
         id: `${Date.now()}-${index}`,
         title: at.title,
@@ -213,8 +170,8 @@ export default function TasksScreen() {
         priority: at.priority,
       }));
 
-      // Link tasks to their generated targets
-      const updatedTasks = tasks.map(task => {
+      // Link tasks to targets
+      const finalTasks = currentTasks.map(task => {
         const linkedTarget = newTargets.find(t => t.linkedTaskIds?.includes(task.id));
         if (linkedTarget) {
           return { ...task, linkedTargetId: linkedTarget.id };
@@ -222,25 +179,29 @@ export default function TasksScreen() {
         return task;
       });
 
-      // Save everything
       await storage.saveTargets([...existingTargets, ...newTargets]);
-      setTasks(updatedTasks);
+      setTasks(finalTasks); // This saves tasks via useEffect
+
+      // 5. Success Message
+      let msg = '';
+      if (cleanedCount > 0) msg += `Marked ${cleanedCount} tasks as unnecessary.\n`;
+      if (newTargets.length > 0) msg += `Created ${newTargets.length} targets for tomorrow.`;
 
       Alert.alert(
-        'Targets Created! 🎯',
-        `${newTargets.length} targets have been created for tomorrow (${format(addDays(new Date(), 1), 'MMM d')}).`,
-        [{ text: 'View Targets', onPress: () => router.push('/targets') }, { text: 'OK' }]
+        'AI Workflow Complete ⚡',
+        msg,
+        [
+          { text: 'View Targets', onPress: () => router.push('/targets') },
+          { text: 'OK' }
+        ]
       );
+
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'Failed to generate targets');
+      console.error('AI Workflow Error:', error);
+      Alert.alert('Error', error.message || 'AI processing failed');
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const handlePrefsComplete = () => {
-    // After prefs are saved, trigger target generation
-    generateTargets();
   };
 
   const renderItem = ({ item, drag, isActive }: RenderItemParams<Task>) => {
@@ -288,7 +249,7 @@ export default function TasksScreen() {
         {/* AI Convert Button */}
         <TouchableOpacity
           style={[styles.aiButton, { backgroundColor: colors.secondary }]}
-          onPress={handleAIPress}
+          onPress={handleAutoAIWorkflow}
           disabled={isLoading}
         >
           {isLoading ? (
