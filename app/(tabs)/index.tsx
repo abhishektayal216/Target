@@ -89,7 +89,7 @@ export default function TasksScreen() {
 
   const openAddSheet = () => {
     const { height: SCREEN_HEIGHT } = Dimensions.get('window');
-    addTaskSheetRef.current?.scrollTo(-SCREEN_HEIGHT / 2); // Larger sheet for text area
+    addTaskSheetRef.current?.scrollTo(-SCREEN_HEIGHT / 1.0); // Full screen sheet for text area
   };
 
   const handlePrefsComplete = () => {

@@ -104,7 +104,7 @@ export default function TargetsScreen() {
             setEnableReminder(false);
         }
         const { height: SCREEN_HEIGHT } = Dimensions.get('window');
-        bottomSheetRef.current?.scrollTo(-SCREEN_HEIGHT / 1.3);
+        bottomSheetRef.current?.scrollTo(-SCREEN_HEIGHT / 1.0);
     };
 
     const closeBottomSheet = () => {

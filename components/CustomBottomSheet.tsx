@@ -12,7 +12,7 @@ import Animated, {
 import { useTheme } from '../context/ThemeContext';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
-const MAX_TRANSLY = -SCREEN_HEIGHT + 50;
+const MAX_TRANSLY = -SCREEN_HEIGHT;
 
 export interface BottomSheetRef {
     scrollTo: (y: number) => void;
@@ -86,7 +86,7 @@ const BottomSheet = forwardRef<BottomSheetRef, BottomSheetProps>(({ children }, 
     const rBottomSheetStyle = useAnimatedStyle(() => {
         // Clamp the final position so it doesn't fly off the top of the screen
         // -SCREEN_HEIGHT + 80 ensures there's always a gap at the top.
-        const clampedTranslateY = Math.max(translateY.value + keyboardOffset.value, -SCREEN_HEIGHT + 80);
+        const clampedTranslateY = Math.max(translateY.value + keyboardOffset.value, MAX_TRANSLY);
         return {
             transform: [{ translateY: clampedTranslateY }],
         };
