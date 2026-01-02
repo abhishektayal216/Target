@@ -8,6 +8,7 @@ import Animated, {
     withTiming
 } from 'react-native-reanimated';
 
+
 import { useTheme } from '../context/ThemeContext';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
